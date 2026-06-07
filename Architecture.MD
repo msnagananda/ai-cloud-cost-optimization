@@ -23,11 +23,11 @@
                 :                      :                  :
                 ▼                      ▼                  ▼
          ┌─────────────--┐     ┌──────────────┐    ┌──────────────┐
-         │  AWS   CLI    │     │   FASTAPI    │    │   OPENAI     │
+         │  AWS   CLI    │     │   FASTAPI    │    │   OLAMA      │
          │               │     │  WEBSOCKET   │    │    API       │
          │aws ce get-cost|     |              |    |              | 
-         |and usage      │     │  (Progress)  │    │              │
-         │ list --rg     │     └──────┬───────┘    │ Cost Analysis│
+         |               │     |   (Progress) │    │              │
+         │               │     └──────┬───────┘    │ Cost Analysis│
          └──────┬──────--┘            :            └──────┬───────┘
                 :                     : Live updates      :
                 ▼                     ▼                   :
@@ -38,7 +38,7 @@
          └─────────────-|   └───────────────┘             :
                                                           ▼
                                                  ┌──────────────┐
-                                                 │    AWS RDS   │
+                                                 │ dockerized   │
                                                  │  POSTGRESQL  │
                                                  │              │
                                                  │              │

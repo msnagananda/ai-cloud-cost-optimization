@@ -1,7 +1,7 @@
 ## AI Cloud Cost Detective - Request Flow
 
 ```
-①  User ─·─·─► React ─·─·─► FastAPI Auth ─·─·─► JWT (Azure PostgreSQL)
+①  User ─·─·─► React ─·─·─► FastAPI Auth ─·─·─► JWT (PostgreSQL)
 
 ②  User selects Resource Group ─·─·─► Python Backend
 

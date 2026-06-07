@@ -1,11 +1,11 @@
-# Prompt 2: OpenAI API Integration for Cost Analysis
+# Prompt 2: OLAMA API Integration for Cost Analysis
 
 Build on top of the existing FastAPI backend. Add AI-powered cost analysis using the OLLAMA  directly.
 
 ## What to build
 
 - Create an `ai_analyzer.py` module in `backend/` that:
-  - Takes the list of Azure resources (from `aws_scanner.py`) as input.
+  - Takes the list of AWS resources (from `aws_scanner.py`) as input.
   - Builds a prompt asking the AI to analyze the active infrastructure for: over-provisioning, idle/unused resources, misconfigurations, legacy generation pricing tiers (e.g., gp2 vs gp3, t2 vs t3), and cost optimization opportunities.
   - Calls the OLLAMA chat completions API (`gpt-4o`) and returns the structured analysis.
 - The AI response should include: a summary, a list of issues found (with severity: high/medium/low), estimated monthly savings, and actionable remediation commands (AWS CLI commands or fallback configuration adjustments that the user can execute directly).

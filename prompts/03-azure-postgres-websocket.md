@@ -1,12 +1,12 @@
-# Prompt 3: AWS PostgreSQL + WebSocket Progress Tracking
+# Prompt 3: dockerized PostgreSQL + WebSocket Progress Tracking
 
 Build on top of the existing FastAPI backend. Add AWS RDS for PostgreSQL for storing users and analysis history, and FastAPI WebSocket for live progress updates.
 
 ## What to build
 
-### Database (AWS Managed PostgreSQL)
+### Database (dockerized PostgreSQL)
 
-- Connect to an Azure Managed PostgreSQL instance using `asyncpg` or `psycopg2`.
+- Connect to an Managed PostgreSQL instance using `asyncpg` or `psycopg2`.
 - Store the database connection string in `.env` (`DATABASE_URL`).
 - Create two tables on startup:
   - `users` — id, email, password_hash, created_at

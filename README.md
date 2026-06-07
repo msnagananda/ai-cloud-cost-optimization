@@ -76,7 +76,7 @@ An AI-powered tool that investigates AWS cloud costs automatically. It scans res
 ## Request Flow
 
 ```
-①  User ─·─·─► React ─·─·─► FastAPI Auth ─·─·─► JWT (Azure PostgreSQL)
+①  User ─·─·─► React ─·─·─► FastAPI Auth ─·─·─► JWT (PostgreSQL)
 
 ②  User selects Resource Group ─·─·─► Python Backend
 
@@ -131,7 +131,7 @@ npm run dev
 
 ## How It Works
 
-1. User signs up / logs in via custom JWT auth (credentials stored in Azure PostgreSQL)
+1. User signs up / logs in via custom JWT auth (credentials stored in PostgreSQL)
 2. User requests a scan for the current billing period.
 3. Backend runs a Cost Explorer query via the AWS CLI to extract all services with charges greater than $0.
 4. Python parses the JSON response, creating an array of active service strings (e.g., ["Amazon Elastic Compute Cloud - Compute", "Amazon Relational Database Service"]).
