@@ -143,6 +143,8 @@ npm run dev
 6. The targeted configuration payload is passed to OOLAMA to cross-reference the active cost footprint with resource configuration data.
 7. Final report with cost breakdown, suggestions, and fix commands is displayed
 
+## Disclaimer: The core source code originates from Abhishek Veermala's project. I have reused it to demonstrate deployment and execution on AWS Cloud, making only minimal changes to prompts and cloud-specific configurations.
+
 ## My Udemy Courses:
 
 ### 🚀 **DevSecOps**
