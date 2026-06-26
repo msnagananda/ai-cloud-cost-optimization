@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -9,6 +12,12 @@ from aws_scanner import (
     AWSError,
     get_enabled_regions,
     scan_active_resources,
+)
+from ai_analyzer import (
+    AIAnalyzerAuthError,
+    AIAnalyzerConnectionError,
+    AIAnalyzerError,
+    analyze as ai_analyze,
 )
 
 app = FastAPI(title="AI Cloud Cost Detective")
@@ -43,9 +52,9 @@ def list_regions():
 
 @app.post("/api/analyze")
 def analyze(request: AnalyzeRequest):
+    # Step ③④⑤ — scan AWS resources via CLI
     try:
-        result = scan_active_resources(request.region)
-        return result
+        scan_result = scan_active_resources(request.region)
     except AWSCLINotFoundError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except AWSCredentialsError as e:
@@ -54,3 +63,15 @@ def analyze(request: AnalyzeRequest):
         raise HTTPException(status_code=403, detail=str(e))
     except AWSError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+    # Step ⑦ — run AI analysis on the scan payload
+    try:
+        analysis = ai_analyze(scan_result)
+    except AIAnalyzerAuthError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except AIAnalyzerConnectionError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except AIAnalyzerError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return analysis
