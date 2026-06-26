@@ -5,8 +5,9 @@ import asyncio
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
 from aws_scanner import (
@@ -22,11 +23,11 @@ from ai_analyzer import (
     AIAnalyzerError,
     analyze as ai_analyze,
 )
-from db import init_db, close_pool, create_analysis, update_analysis, get_history
+from db import init_db, close_pool, create_analysis, update_analysis, get_history, get_pool
+from auth import hash_password, verify_password, create_token, decode_token
 
-
-# Tracks active WebSocket connections keyed by analysis_id
 _ws_connections: dict[str, WebSocket] = {}
+_bearer = HTTPBearer(auto_error=False)
 
 
 @asynccontextmanager
@@ -34,7 +35,7 @@ async def lifespan(app: FastAPI):
     try:
         await init_db()
     except Exception:
-        pass  # DB optional — app still starts without it
+        pass
     yield
     await close_pool()
 
@@ -50,9 +51,79 @@ app.add_middleware(
 )
 
 
-class AnalyzeRequest(BaseModel):
-    region: str
-    user_id: str | None = None
+# ---------------------------------------------------------------------------
+# Auth helpers
+# ---------------------------------------------------------------------------
+
+def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> dict:
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Not authenticated.")
+    return decode_token(credentials.credentials)
+
+
+def get_optional_user(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> dict | None:
+    if not credentials:
+        return None
+    try:
+        return decode_token(credentials.credentials)
+    except HTTPException:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Auth endpoints
+# ---------------------------------------------------------------------------
+
+class AuthRequest(BaseModel):
+    email: str
+    password: str
+
+
+@app.post("/api/auth/signup")
+async def signup(body: AuthRequest):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        existing = await conn.fetchrow("SELECT id FROM users WHERE email = $1", body.email)
+        if existing:
+            raise HTTPException(status_code=409, detail="Email already registered.")
+        password_hash = hash_password(body.password)
+        row = await conn.fetchrow(
+            "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email",
+            body.email,
+            password_hash,
+        )
+    token = create_token(str(row["id"]), row["email"])
+    return {"access_token": token, "token_type": "bearer", "email": row["email"]}
+
+
+@app.post("/api/auth/login")
+async def login(body: AuthRequest):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, email, password_hash FROM users WHERE email = $1", body.email
+        )
+    if not row or not verify_password(body.password, row["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+    token = create_token(str(row["id"]), row["email"])
+    return {"access_token": token, "token_type": "bearer", "email": row["email"]}
+
+
+# ---------------------------------------------------------------------------
+# WebSocket
+# ---------------------------------------------------------------------------
+
+@app.websocket("/ws/progress/{analysis_id}")
+async def websocket_progress(websocket: WebSocket, analysis_id: str):
+    await websocket.accept()
+    _ws_connections[analysis_id] = websocket
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _ws_connections.pop(analysis_id, None)
 
 
 async def _push(analysis_id: str, message: str) -> None:
@@ -64,19 +135,9 @@ async def _push(analysis_id: str, message: str) -> None:
             pass
 
 
-@app.websocket("/ws/progress/{analysis_id}")
-async def websocket_progress(websocket: WebSocket, analysis_id: str):
-    await websocket.accept()
-    _ws_connections[analysis_id] = websocket
-    try:
-        # Hold the connection open until the client disconnects
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        pass
-    finally:
-        _ws_connections.pop(analysis_id, None)
-
+# ---------------------------------------------------------------------------
+# Core endpoints
+# ---------------------------------------------------------------------------
 
 @app.get("/api/regions")
 def list_regions():
@@ -93,18 +154,20 @@ def list_regions():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class AnalyzeRequest(BaseModel):
+    region: str
+
+
 @app.post("/api/analyze")
-async def analyze(request: AnalyzeRequest):
+async def analyze(request: AnalyzeRequest, user: dict = Depends(get_current_user)):
     analysis_id = str(uuid.uuid4())
 
-    # Persist initial record if DB is available
     try:
-        db_id = await create_analysis(request.user_id, request.region)
+        db_id = await create_analysis(user["sub"], request.region)
         analysis_id = db_id
     except Exception:
-        pass  # proceed without DB
+        pass
 
-    # Step ③④ — Cost Explorer + dynamic resource scan
     await _push(analysis_id, "Querying AWS Cost Explorer for active services...")
     try:
         scan_result = await asyncio.to_thread(scan_active_resources, request.region)
@@ -117,10 +180,8 @@ async def analyze(request: AnalyzeRequest):
     except AWSError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    # Step ⑤ — targeted resource queries complete (inside scan_active_resources)
     await _push(analysis_id, f"Scanning active services in {request.region}...")
 
-    # Step ⑦ — AI analysis
     await _push(analysis_id, "Analyzing costs with AI...")
     try:
         analysis = await asyncio.to_thread(ai_analyze, scan_result)
@@ -129,7 +190,6 @@ async def analyze(request: AnalyzeRequest):
     except AIAnalyzerError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    # Step ⑧ — persist result
     await _push(analysis_id, "Storing results...")
     try:
         savings = str(analysis.get("total_estimated_monthly_savings_usd", 0))
@@ -142,17 +202,19 @@ async def analyze(request: AnalyzeRequest):
             analysis_result=analysis,
         )
     except Exception:
-        pass  # non-fatal if DB unavailable
+        pass
 
     await _push(analysis_id, "Analysis complete")
-
     return {"analysis_id": analysis_id, **analysis}
 
 
 @app.get("/api/history")
-async def history(user_id: str | None = Query(default=None), limit: int = Query(default=20, le=100)):
+async def history(
+    limit: int = Query(default=20, le=100),
+    user: dict = Depends(get_current_user),
+):
     try:
-        records = await get_history(user_id, limit)
+        records = await get_history(user["sub"], limit)
         return {"analyses": records}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
