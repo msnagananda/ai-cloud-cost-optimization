@@ -140,7 +140,7 @@ async def _push(analysis_id: str, message: str) -> None:
 # ---------------------------------------------------------------------------
 
 @app.get("/api/regions")
-def list_regions():
+def list_regions(_user: dict = Depends(get_current_user)):
     try:
         regions = get_enabled_regions()
         return {"regions": regions}
@@ -156,11 +156,14 @@ def list_regions():
 
 class AnalyzeRequest(BaseModel):
     region: str
+    ws_id: str | None = None  # client-generated UUID used as WS channel key
 
 
 @app.post("/api/analyze")
 async def analyze(request: AnalyzeRequest, user: dict = Depends(get_current_user)):
     analysis_id = str(uuid.uuid4())
+    # ws_id is the channel the frontend already connected to; fall back to analysis_id
+    ws_channel = request.ws_id or analysis_id
 
     try:
         db_id = await create_analysis(user["sub"], request.region)
@@ -168,7 +171,7 @@ async def analyze(request: AnalyzeRequest, user: dict = Depends(get_current_user
     except Exception:
         pass
 
-    await _push(analysis_id, "Querying AWS Cost Explorer for active services...")
+    await _push(ws_channel, "Querying AWS Cost Explorer for active services...")
     try:
         scan_result = await asyncio.to_thread(scan_active_resources, request.region)
     except AWSCLINotFoundError as e:
@@ -180,9 +183,9 @@ async def analyze(request: AnalyzeRequest, user: dict = Depends(get_current_user
     except AWSError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    await _push(analysis_id, f"Scanning active services in {request.region}...")
+    await _push(ws_channel, f"Scanning active services in {request.region}...")
 
-    await _push(analysis_id, "Analyzing costs with AI...")
+    await _push(ws_channel, "Analyzing costs with AI...")
     try:
         analysis = await asyncio.to_thread(ai_analyze, scan_result)
     except AIAnalyzerConnectionError as e:
@@ -190,7 +193,7 @@ async def analyze(request: AnalyzeRequest, user: dict = Depends(get_current_user
     except AIAnalyzerError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    await _push(analysis_id, "Storing results...")
+    await _push(ws_channel, "Storing results...")
     try:
         savings = str(analysis.get("total_estimated_monthly_savings_usd", 0))
         await update_analysis(
@@ -204,7 +207,7 @@ async def analyze(request: AnalyzeRequest, user: dict = Depends(get_current_user
     except Exception:
         pass
 
-    await _push(analysis_id, "Analysis complete")
+    await _push(ws_channel, "Analysis complete")
     return {"analysis_id": analysis_id, **analysis}
 
 
