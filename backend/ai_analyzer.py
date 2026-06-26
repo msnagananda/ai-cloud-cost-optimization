@@ -1,7 +1,7 @@
 import json
 import os
 
-from openai import OpenAI, AuthenticationError, PermissionDeniedError, APIConnectionError
+import ollama
 
 _SYSTEM_PROMPT = """You are an expert AWS cloud cost optimization engineer.
 You will be given a JSON payload describing active AWS resources discovered in a customer's account.
@@ -56,55 +56,47 @@ class AIAnalyzerError(Exception):
     pass
 
 
-class AIAnalyzerAuthError(AIAnalyzerError):
-    pass
-
-
 class AIAnalyzerConnectionError(AIAnalyzerError):
     pass
 
 
 def analyze(scan_result: dict) -> dict:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise AIAnalyzerAuthError(
-            "OPENAI_API_KEY environment variable is not set. "
-            "Add it to your .env file and restart the server."
-        )
+    model = os.getenv("OLLAMA_MODEL", "llama3")
+    host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 
-    client = OpenAI(api_key=api_key)
+    client = ollama.Client(host=host)
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            response_format={"type": "json_object"},
+        response = client.chat(
+            model=model,
+            format="json",
+            options={"temperature": 0.2},
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": _build_user_prompt(scan_result)},
             ],
-            temperature=0.2,
         )
-    except AuthenticationError:
-        raise AIAnalyzerAuthError(
-            "Invalid OpenAI API key. Check your OPENAI_API_KEY in .env."
-        )
-    except PermissionDeniedError:
-        raise AIAnalyzerAuthError(
-            "OpenAI API key does not have permission to use gpt-4o. "
-            "Ensure your account has access to the model."
-        )
-    except APIConnectionError as e:
-        raise AIAnalyzerConnectionError(
-            f"Could not connect to OpenAI API: {e}"
-        )
+    except ollama.ResponseError as e:
+        if "model" in str(e).lower() and "not found" in str(e).lower():
+            raise AIAnalyzerError(
+                f"OLLAMA model '{model}' is not installed. "
+                f"Run: ollama pull {model}"
+            )
+        raise AIAnalyzerError(f"OLLAMA error: {e}")
+    except Exception as e:
+        if "connection" in str(e).lower() or "refused" in str(e).lower():
+            raise AIAnalyzerConnectionError(
+                f"Could not connect to OLLAMA at {host}. "
+                "Make sure OLLAMA is running: ollama serve"
+            )
+        raise AIAnalyzerError(f"Unexpected error calling OLLAMA: {e}")
 
-    raw = response.choices[0].message.content
+    raw = response.message.content
     try:
         analysis = json.loads(raw)
     except json.JSONDecodeError:
-        raise AIAnalyzerError(f"OpenAI returned non-JSON response: {raw[:200]}")
+        raise AIAnalyzerError(f"OLLAMA returned non-JSON response: {raw[:200]}")
 
-    # Merge scan metadata into the final response
     analysis["region"] = scan_result.get("region")
     analysis["active_services"] = scan_result.get("active_services", [])
     analysis["total_resources_scanned"] = scan_result.get("total_resources", 0)

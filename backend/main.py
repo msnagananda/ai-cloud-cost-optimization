@@ -14,7 +14,6 @@ from aws_scanner import (
     scan_active_resources,
 )
 from ai_analyzer import (
-    AIAnalyzerAuthError,
     AIAnalyzerConnectionError,
     AIAnalyzerError,
     analyze as ai_analyze,
@@ -67,8 +66,6 @@ def analyze(request: AnalyzeRequest):
     # Step ⑦ — run AI analysis on the scan payload
     try:
         analysis = ai_analyze(scan_result)
-    except AIAnalyzerAuthError as e:
-        raise HTTPException(status_code=401, detail=str(e))
     except AIAnalyzerConnectionError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except AIAnalyzerError as e:
