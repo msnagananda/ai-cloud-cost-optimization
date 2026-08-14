@@ -7,7 +7,7 @@ strategy("Swing Trading Strategy - EMA + Supertrend (Daily)",
      default_qty_type = strategy.percent_of_equity,
      default_qty_value = 100,
      commission_type = strategy.commission.percent,
-     commission_value = input.float(0.05, "Commission %", minval=0.0, step=0.01, group="STRATEGY / EXIT"),
+     commission_value = 0.05,
      process_orders_on_close = true)
 
 // =====================================================================================
