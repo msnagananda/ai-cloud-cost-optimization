@@ -1,0 +1,309 @@
+//@version=6
+strategy("Swing Trading Strategy - EMA + Supertrend (Daily)",
+     shorttitle    = "SwingStrat",
+     overlay       = true,
+     pyramiding    = 0,
+     initial_capital = 100000,
+     default_qty_type = strategy.percent_of_equity,
+     default_qty_value = 100,
+     commission_type = strategy.commission.percent,
+     commission_value = input.float(0.05, "Commission %", minval=0.0, step=0.01, group="STRATEGY / EXIT"),
+     process_orders_on_close = true)
+
+// =====================================================================================
+// GROUP LABELS
+// =====================================================================================
+gEmaCalc  = "EMA CALCULATION"
+gEmaDisp  = "EMA DISPLAY"
+gRsi      = "RSI"
+gVol      = "VOLUME"
+gAtr      = "ATR"
+gSt       = "SUPERTREND"
+gTargets  = "TARGETS"
+gExit     = "STRATEGY / EXIT"
+
+// =====================================================================================
+// EMA CALCULATION INPUTS
+// =====================================================================================
+emaLen5   = input.int(5,   "EMA 5 Length",   minval=1, group=gEmaCalc)
+emaLen13  = input.int(13,  "EMA 13 Length",  minval=1, group=gEmaCalc)
+emaLen26  = input.int(26,  "EMA 26 Length",  minval=1, group=gEmaCalc)
+emaLen50  = input.int(50,  "EMA 50 Length",  minval=1, group=gEmaCalc)
+emaLen200 = input.int(200, "EMA 200 Length", minval=1, group=gEmaCalc)
+
+// =====================================================================================
+// EMA DISPLAY INPUTS (visual only - never affects strategy logic)
+// =====================================================================================
+showEma5    = input.bool(true,  "Show EMA 5",   group=gEmaDisp)
+ema5Color   = input.color(color.blue,          "EMA 5 Color", group=gEmaDisp)
+ema5Width   = input.int(2, "EMA 5 Width", minval=1, maxval=4, group=gEmaDisp)
+
+showEma13   = input.bool(true,  "Show EMA 13",  group=gEmaDisp)
+ema13Color  = input.color(color.orange,        "EMA 13 Color", group=gEmaDisp)
+ema13Width  = input.int(2, "EMA 13 Width", minval=1, maxval=4, group=gEmaDisp)
+
+showEma26   = input.bool(true,  "Show EMA 26",  group=gEmaDisp)
+ema26Color  = input.color(color.purple,        "EMA 26 Color", group=gEmaDisp)
+ema26Width  = input.int(2, "EMA 26 Width", minval=1, maxval=4, group=gEmaDisp)
+
+showEma50   = input.bool(true,  "Show EMA 50",  group=gEmaDisp)
+ema50Color  = input.color(color.black,         "EMA 50 Color", group=gEmaDisp)
+ema50Width  = input.int(2, "EMA 50 Width", minval=1, maxval=4, group=gEmaDisp)
+
+showEma200  = input.bool(true,  "Show EMA 200", group=gEmaDisp)
+ema200Color = input.color(color.red,           "EMA 200 Color", group=gEmaDisp)
+ema200Width = input.int(2, "EMA 200 Width", minval=1, maxval=4, group=gEmaDisp)
+
+// =====================================================================================
+// RSI INPUTS
+// =====================================================================================
+rsiLen    = input.int(14, "RSI Length", minval=1, group=gRsi)
+rsiMin    = input.float(50, "RSI Minimum (Buy)", group=gRsi)
+rsiMax    = input.float(70, "RSI Maximum (Buy)", group=gRsi)
+
+// =====================================================================================
+// VOLUME INPUTS
+// =====================================================================================
+volLookback   = input.int(20, "Volume Average Lookback", minval=1, group=gVol)
+volMultiplier = input.float(1.5, "Volume Multiplier (x Avg Volume)", minval=0.1, step=0.1, group=gVol)
+
+// =====================================================================================
+// ATR INPUTS
+// =====================================================================================
+atrLen    = input.int(14, "ATR Length", minval=1, group=gAtr)
+atrMinPct = input.float(1.5, "Minimum ATR %", minval=0.0, step=0.1, group=gAtr)
+atrMaxPct = input.float(4.0, "Maximum ATR %", minval=0.0, step=0.1, group=gAtr)
+
+// =====================================================================================
+// SUPERTREND INPUTS
+// =====================================================================================
+stAtrLen        = input.int(10, "Supertrend ATR Length", minval=1, group=gSt)
+stFactor        = input.float(3.0, "Supertrend Factor", minval=0.1, step=0.1, group=gSt)
+showSupertrend  = input.bool(true, "Show Supertrend", group=gSt)
+useSupertrendSig = input.bool(true, "Use Supertrend for BUY/EXIT Signals", group=gSt)
+stBullColor     = input.color(color.green, "Bullish Supertrend Color", group=gSt)
+stBearColor     = input.color(color.red,   "Bearish Supertrend Color", group=gSt)
+stWidth         = input.int(2, "Supertrend Line Width", minval=1, maxval=4, group=gSt)
+
+// =====================================================================================
+// TARGET INPUTS
+// =====================================================================================
+target1Pct  = input.float(10, "Target 1 %", group=gTargets)
+showTarget1 = input.bool(true, "Show Target 1 Line", group=gTargets)
+target2Pct  = input.float(12, "Target 2 %", group=gTargets)
+showTarget2 = input.bool(true, "Show Target 2 Line", group=gTargets)
+target3Pct  = input.float(15, "Target 3 %", group=gTargets)
+showTarget3 = input.bool(true, "Show Target 3 Line", group=gTargets)
+target4Pct  = input.float(20, "Target 4 %", group=gTargets)
+showTarget4 = input.bool(true, "Show Target 4 Line", group=gTargets)
+target5Pct  = input.float(30, "Target 5 %", group=gTargets)
+showTarget5 = input.bool(true, "Show Target 5 Line", group=gTargets)
+
+// =====================================================================================
+// STRATEGY / EXIT INPUTS
+// =====================================================================================
+stopLossPct = input.float(10, "Stop Loss % (from entry)", minval=0.1, step=0.1, group=gExit)
+
+// =====================================================================================
+// EMA CALCULATIONS (always calculated regardless of visual display settings)
+// =====================================================================================
+ema5   = ta.ema(close, emaLen5)
+ema13  = ta.ema(close, emaLen13)
+ema26  = ta.ema(close, emaLen26)
+ema50  = ta.ema(close, emaLen50)
+ema200 = ta.ema(close, emaLen200)
+
+// =====================================================================================
+// SUPERTREND CALCULATION (always calculated regardless of visual display settings)
+// =====================================================================================
+[supertrendVal, stDirection] = ta.supertrend(stFactor, stAtrLen)
+stBullish = stDirection < 0
+stBearish = stDirection > 0
+stColor   = stBullish ? stBullColor : stBearColor
+
+// =====================================================================================
+// RSI / VOLUME / ATR CALCULATIONS
+// =====================================================================================
+rsiValue   = ta.rsi(close, rsiLen)
+avgVolume  = ta.sma(volume, volLookback)
+volHigh    = volume >= avgVolume * volMultiplier
+atrValue   = ta.atr(atrLen)
+atrPct     = atrValue / close * 100
+atrInRange = atrPct >= atrMinPct and atrPct <= atrMaxPct
+
+// =====================================================================================
+// BUY CONDITIONS
+// =====================================================================================
+cond1_priceAboveEma50   = close > ema50
+cond2_priceAboveEma200  = close > ema200
+cond3_ema50Rising       = ema50 > ema50[1]
+cond4_ema5AboveEma13    = ema5 > ema13
+cond5_ema5AboveEma26    = ema5 > ema26
+cond6_ema5CrossAboveEma13 = ta.crossover(ema5, ema13)
+cond7_rsiInRange        = rsiValue > rsiMin and rsiValue < rsiMax
+cond8_volumeHigh        = volHigh
+cond9_atrInRange        = atrInRange
+cond10_supertrendOk     = useSupertrendSig ? stBullish : true
+
+buySignal = cond1_priceAboveEma50 and cond2_priceAboveEma200 and cond3_ema50Rising and
+             cond4_ema5AboveEma13 and cond5_ema5AboveEma26 and cond6_ema5CrossAboveEma13 and
+             cond7_rsiInRange and cond8_volumeHigh and cond9_atrInRange and cond10_supertrendOk
+
+// =====================================================================================
+// REVERSAL WARNING (EMA 5 crosses below EMA 13) - warning only, no exit
+// =====================================================================================
+warningSignal = ta.crossunder(ema5, ema13)
+
+// =====================================================================================
+// REVERSAL CONFIRMATION / EXIT (EMA 5 crosses below EMA 26, + Supertrend bearish if enabled)
+// =====================================================================================
+exitCrossCondition = ta.crossunder(ema5, ema26)
+exitConfirmed = useSupertrendSig ? (exitCrossCondition and stBearish) : exitCrossCondition
+
+// =====================================================================================
+// STRATEGY ORDERS
+// =====================================================================================
+if buySignal
+    strategy.entry("Long", strategy.long, comment="BUY")
+
+if exitConfirmed
+    strategy.close("Long", comment="EXIT")
+
+entryPrice = strategy.position_size > 0 ? strategy.position_avg_price : na
+stopPrice  = strategy.position_size > 0 ? entryPrice * (1 - stopLossPct / 100) : na
+
+strategy.exit("Stop Loss", from_entry="Long", stop=stopPrice, comment="STOP")
+
+// =====================================================================================
+// PROFIT TARGET PRICES (reference only - do NOT auto-close position)
+// =====================================================================================
+target1Price = strategy.position_size > 0 ? entryPrice * (1 + target1Pct / 100) : na
+target2Price = strategy.position_size > 0 ? entryPrice * (1 + target2Pct / 100) : na
+target3Price = strategy.position_size > 0 ? entryPrice * (1 + target3Pct / 100) : na
+target4Price = strategy.position_size > 0 ? entryPrice * (1 + target4Pct / 100) : na
+target5Price = strategy.position_size > 0 ? entryPrice * (1 + target5Pct / 100) : na
+
+currentProfitPct = strategy.position_size > 0 ? (close - entryPrice) / entryPrice * 100 : na
+
+// =====================================================================================
+// PLOTS - EMAs (visual only, hiding never affects calculations above)
+// =====================================================================================
+plot(showEma5   ? ema5   : na, title="EMA 5",   color=ema5Color,   linewidth=ema5Width)
+plot(showEma13  ? ema13  : na, title="EMA 13",  color=ema13Color,  linewidth=ema13Width)
+plot(showEma26  ? ema26  : na, title="EMA 26",  color=ema26Color,  linewidth=ema26Width)
+plot(showEma50  ? ema50  : na, title="EMA 50",  color=ema50Color,  linewidth=ema50Width)
+plot(showEma200 ? ema200 : na, title="EMA 200", color=ema200Color, linewidth=ema200Width)
+
+// =====================================================================================
+// PLOT - SUPERTREND (visual only, hiding never affects signal usage)
+// =====================================================================================
+plot(showSupertrend ? supertrendVal : na, title="Supertrend", color=stColor, linewidth=stWidth, style=plot.style_linebr)
+
+// =====================================================================================
+// PLOTS - STOP LOSS AND TARGET LINES (only while in a trade)
+// =====================================================================================
+plot(stopPrice, title="Stop Loss Line", color=color.new(color.red, 0), style=plot.style_linebr, linewidth=1)
+plot(showTarget1 ? target1Price : na, title="Target 1 (+10%) Line", color=color.new(color.teal, 0),   style=plot.style_linebr, linewidth=1)
+plot(showTarget2 ? target2Price : na, title="Target 2 (+12%) Line", color=color.new(color.teal, 20),  style=plot.style_linebr, linewidth=1)
+plot(showTarget3 ? target3Price : na, title="Target 3 (+15%) Line", color=color.new(color.teal, 40),  style=plot.style_linebr, linewidth=1)
+plot(showTarget4 ? target4Price : na, title="Target 4 (+20%) Line", color=color.new(color.teal, 60),  style=plot.style_linebr, linewidth=1)
+plot(showTarget5 ? target5Price : na, title="Target 5 (+30%) Line", color=color.new(color.teal, 80),  style=plot.style_linebr, linewidth=1)
+
+// =====================================================================================
+// LABELS - BUY / WARNING / EXIT (only on the actual signal candle, no clutter)
+// =====================================================================================
+plotshape(buySignal, title="BUY Label", style=shape.labelup, location=location.belowbar,
+     color=color.new(color.green, 0), text="BUY", textcolor=color.white, size=size.small)
+
+plotshape(warningSignal, title="WARNING Label", style=shape.labeldown, location=location.abovebar,
+     color=color.new(color.orange, 0), text="WARNING", textcolor=color.white, size=size.tiny)
+
+plotshape(exitConfirmed, title="EXIT Label", style=shape.labeldown, location=location.abovebar,
+     color=color.new(color.red, 0), text="EXIT", textcolor=color.white, size=size.small)
+
+// =====================================================================================
+// INFORMATION TABLE (top-right, compact)
+// =====================================================================================
+var table infoTable = table.new(position.top_right, 2, 17, border_width=1, border_color=color.gray, frame_width=1, frame_color=color.gray)
+
+statusColor(txt) =>
+    switch txt
+        "BUY" => color.new(color.green, 0)
+        "IN TRADE" => color.new(color.blue, 0)
+        "BULLISH" => color.new(color.green, 0)
+        "RISING" => color.new(color.green, 0)
+        "HIGH" => color.new(color.green, 0)
+        "BEARISH" => color.new(color.red, 0)
+        "FALLING" => color.new(color.red, 0)
+        "LOW" => color.new(color.red, 0)
+        "WARNING" => color.new(color.orange, 0)
+        => color.new(color.gray, 0)
+
+if barstate.islast
+    swingStatus = strategy.position_size > 0 ? "IN TRADE" : (buySignal ? "BUY" : "NO TRADE")
+    stStatusTxt = stBullish ? "BULLISH" : "BEARISH"
+    volStatusTxt = volHigh ? "HIGH" : "LOW"
+    emaShortTxt = (ema5 > ema13 and ema5 > ema26) ? "BULLISH" : (ema5 < ema13 and ema5 < ema26) ? "BEARISH" : "MIXED"
+    ema50StatusTxt = ema50 > ema50[1] ? "RISING" : "FALLING"
+    warnActive = warningSignal
+
+    headerColor = color.new(color.navy, 0)
+
+    table.cell(infoTable, 0, 0, "SWING STATUS", text_color=color.white, bgcolor=headerColor, text_halign=text.align_left)
+    table.cell(infoTable, 1, 0, warnActive ? "WARNING" : swingStatus, text_color=color.white, bgcolor=statusColor(warnActive ? "WARNING" : swingStatus))
+
+    table.cell(infoTable, 0, 1, "Supertrend", text_color=color.black, bgcolor=color.new(color.gray, 80), text_halign=text.align_left)
+    table.cell(infoTable, 1, 1, stStatusTxt, text_color=color.white, bgcolor=statusColor(stStatusTxt))
+
+    table.cell(infoTable, 0, 2, "RSI", text_color=color.black, bgcolor=color.new(color.gray, 80), text_halign=text.align_left)
+    table.cell(infoTable, 1, 2, str.tostring(rsiValue, "#.##"), text_color=color.black, bgcolor=color.new(color.gray, 80))
+
+    table.cell(infoTable, 0, 3, "Volume", text_color=color.black, bgcolor=color.new(color.gray, 80), text_halign=text.align_left)
+    table.cell(infoTable, 1, 3, volStatusTxt, text_color=color.white, bgcolor=statusColor(volStatusTxt))
+
+    table.cell(infoTable, 0, 4, "ATR %", text_color=color.black, bgcolor=color.new(color.gray, 80), text_halign=text.align_left)
+    table.cell(infoTable, 1, 4, str.tostring(atrPct, "#.##") + "%", text_color=color.black, bgcolor=color.new(color.gray, 80))
+
+    table.cell(infoTable, 0, 5, "EMA 5/13/26", text_color=color.black, bgcolor=color.new(color.gray, 80), text_halign=text.align_left)
+    table.cell(infoTable, 1, 5, emaShortTxt, text_color=color.white, bgcolor=statusColor(emaShortTxt))
+
+    table.cell(infoTable, 0, 6, "EMA 50", text_color=color.black, bgcolor=color.new(color.gray, 80), text_halign=text.align_left)
+    table.cell(infoTable, 1, 6, ema50StatusTxt, text_color=color.white, bgcolor=statusColor(ema50StatusTxt))
+
+    table.cell(infoTable, 0, 7, "Entry Price", text_color=color.black, bgcolor=color.new(color.gray, 80), text_halign=text.align_left)
+    table.cell(infoTable, 1, 7, strategy.position_size > 0 ? str.tostring(entryPrice, "#.##") : "-", text_color=color.black, bgcolor=color.new(color.gray, 80))
+
+    table.cell(infoTable, 0, 8, "Current Price", text_color=color.black, bgcolor=color.new(color.gray, 80), text_halign=text.align_left)
+    table.cell(infoTable, 1, 8, str.tostring(close, "#.##"), text_color=color.black, bgcolor=color.new(color.gray, 80))
+
+    table.cell(infoTable, 0, 9, "Profit %", text_color=color.black, bgcolor=color.new(color.gray, 80), text_halign=text.align_left)
+    table.cell(infoTable, 1, 9, strategy.position_size > 0 ? str.tostring(currentProfitPct, "#.##") + "%" : "-",
+         text_color=color.white, bgcolor=strategy.position_size > 0 ? (currentProfitPct >= 0 ? color.new(color.green, 0) : color.new(color.red, 0)) : color.new(color.gray, 80))
+
+    table.cell(infoTable, 0, 10, "Stop Price", text_color=color.black, bgcolor=color.new(color.gray, 80), text_halign=text.align_left)
+    table.cell(infoTable, 1, 10, strategy.position_size > 0 ? str.tostring(stopPrice, "#.##") : "-", text_color=color.black, bgcolor=color.new(color.gray, 80))
+
+    table.cell(infoTable, 0, 11, "+10% Target", text_color=color.black, bgcolor=color.new(color.gray, 80), text_halign=text.align_left)
+    table.cell(infoTable, 1, 11, strategy.position_size > 0 ? str.tostring(target1Price, "#.##") : "-", text_color=color.black, bgcolor=color.new(color.gray, 80))
+
+    table.cell(infoTable, 0, 12, "+12% Target", text_color=color.black, bgcolor=color.new(color.gray, 80), text_halign=text.align_left)
+    table.cell(infoTable, 1, 12, strategy.position_size > 0 ? str.tostring(target2Price, "#.##") : "-", text_color=color.black, bgcolor=color.new(color.gray, 80))
+
+    table.cell(infoTable, 0, 13, "+15% Target", text_color=color.black, bgcolor=color.new(color.gray, 80), text_halign=text.align_left)
+    table.cell(infoTable, 1, 13, strategy.position_size > 0 ? str.tostring(target3Price, "#.##") : "-", text_color=color.black, bgcolor=color.new(color.gray, 80))
+
+    table.cell(infoTable, 0, 14, "+20% Target", text_color=color.black, bgcolor=color.new(color.gray, 80), text_halign=text.align_left)
+    table.cell(infoTable, 1, 14, strategy.position_size > 0 ? str.tostring(target4Price, "#.##") : "-", text_color=color.black, bgcolor=color.new(color.gray, 80))
+
+    table.cell(infoTable, 0, 15, "+30% Target", text_color=color.black, bgcolor=color.new(color.gray, 80), text_halign=text.align_left)
+    table.cell(infoTable, 1, 15, strategy.position_size > 0 ? str.tostring(target5Price, "#.##") : "-", text_color=color.black, bgcolor=color.new(color.gray, 80))
+
+    table.cell(infoTable, 0, 16, "Use ST Signal", text_color=color.black, bgcolor=color.new(color.gray, 80), text_halign=text.align_left)
+    table.cell(infoTable, 1, 16, useSupertrendSig ? "ON" : "OFF", text_color=color.black, bgcolor=color.new(color.gray, 80))
+
+// =====================================================================================
+// ALERTS
+// =====================================================================================
+alertcondition(buySignal, title="BUY SIGNAL", message="{{ticker}} BUY SIGNAL at {{close}}")
+alertcondition(warningSignal, title="REVERSAL WARNING", message="{{ticker}} REVERSAL WARNING at {{close}}")
+alertcondition(exitConfirmed, title="EXIT CONFIRMED", message="{{ticker}} EXIT CONFIRMED at {{close}}")
